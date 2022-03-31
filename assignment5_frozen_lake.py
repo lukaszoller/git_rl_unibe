@@ -18,7 +18,13 @@ def choose_action(state, epsilon, Q):
 def update(state, state2, reward, action, action2, Q, alpha):
 	predict = Q[state, action]
 	target = reward + gamma * Q[state2, action2]
-	Q[state, action] = Q[state, action] + alpha * (target - predict)
+	Q[state, action] = predict + alpha * (target - predict)
+
+def update_new(state, state2_list, reward_list, action_list, action2_list, Q, alpha):
+    for i in range(len(state2_list)):
+        predict = Q[state, action_list[i]]
+        target = reward_list[i] + gamma * Q[state2_list[i], action2_list[i]]
+        Q[state, action_list[i]] = Q[state, action_list[i]] + alpha * (target - predict)
 
 def return_new_reward(done, reward):
     if done and reward == 1:    # goal
@@ -132,7 +138,7 @@ def test_epsilon(epsilon_array, alpha):
                  linewidth=0.5)
 
     plt.legend()
-    plt.title(r'Mean reward per episode, differentte $\epsilon$')
+    plt.title(r'Mean reward per episode, different $\epsilon$, n = %i' %n)
     plt.ylabel('mean reward per episode')
     plt.xlabel('episode')
     plt.show()
@@ -212,7 +218,129 @@ def test_alpha(alpha_array, epsilon):
                  linewidth=0.5)
 
     plt.legend()
-    plt.title(r'Mean reward per episode, different stepsizes $\alpha$')
+    plt.title(r'Mean reward per episode, different stepsizes $\alpha$, n = %i' % n)
+    plt.ylabel('mean reward per episode')
+    plt.xlabel('episode')
+    plt.show()
+
+def test_update_compare(alpha, epsilon):
+    # Initializing the reward
+    reward = 0
+    update_test = []
+
+    ## test all epsilons
+    for update_function in range(2):
+        # we run n experiments and compute the mean for each episode (mean_episode_reward is stored in eps_test)
+        if update_function == 0:
+            mean_episode_reward = np.zeros(shape=(total_episodes,))
+        else:
+            mean_episode_reward_opt = np.zeros(shape=(total_episodes,))
+
+        # repeat the test for each epsilon n times
+        for i in range(n):
+
+
+            # Initializing the Q-matrix
+            if update_function == 0:
+                # store reward for each episode in episode_rewards
+                episode_rewards = []
+                Q = np.zeros((env.observation_space.n, env.action_space.n))
+            else:
+                # store reward for each episode in episode_rewards
+                episode_rewards_opt = []
+                Q_opt = np.zeros((env.observation_space.n, env.action_space.n))
+
+           # loop over episodes (this is the actual run / the optimization of the q table)
+            for episode in range(total_episodes):
+                # print(episode)
+                t = 0
+                state1 = env.reset()
+                action1 = choose_action(state1, epsilon, Q)
+                episode_reward = 0
+                episode_reward_opt = 0
+                epsilon *= epsilon_decay ** episode
+
+                while t < max_steps:
+                    # Getting the next state
+                    state2, reward, done, info = env.step(action1)
+                    # use my own reward function (function from gym returns only +1 if goal)
+                    reward = return_new_reward(done, reward)
+                    episode_reward += reward
+                    # Choosing the next action
+                    action2 = choose_action(state2, epsilon, Q)
+
+                    # Learning the Q-value
+                    # normal update
+                    if update_function == 0:
+
+                        # update q value
+                        update(state1, state2, reward, action1, action2, Q, alpha)
+
+                    # optimized update
+                    else:
+                        # add reward from outside if else (above) to
+                        episode_reward_opt += reward
+
+                        old_actions = np.arange(0, env.action_space.n, 1)       # nothing to save in this array because it commands the loop
+                        new_actions = np.zeros(env.action_space.n, dtype=np.int8)
+                        old_states = np.zeros(env.action_space.n, dtype=np.int8)
+                        new_states = np.zeros(env.action_space.n, dtype=np.int8)
+                        reward_array = np.zeros(env.action_space.n, dtype=np.int8)
+
+                        for i in range(env.action_space.n):
+                            new_states[i], reward_i, done_i, info = env.step(old_actions[i])
+                            reward_array[i] = return_new_reward(done_i, reward_i)
+                            new_actions[i] = choose_action(new_states[i], epsilon, Q_opt)
+                            update(old_states[i], new_states[i], reward_array[i],
+                                   i, new_actions[i], Q_opt, alpha)
+
+                            old_states[i] = new_states[i]
+                            old_actions[i] = new_actions[i]
+
+
+                    state1 = state2
+                    action1 = action2
+
+                    # Updating the respective vaLues
+                    t += 1
+
+                    # If at the end of learning process
+                    if done:
+                        break
+                # store rewards in data
+                if update_function == 0:
+                    episode_rewards.append(episode_reward)
+                else:
+                    episode_rewards_opt.append(episode_reward_opt)
+
+            # compute mean of the reward arrays (stepwise mean function
+            # avg = avg + (old - new)*1/n
+            if update_function == 0:
+                mean_episode_reward = np.add(mean_episode_reward,
+                                             np.multiply(
+                                                 np.subtract(episode_rewards, mean_episode_reward),
+                                                 1 / (i + 1)))
+            else:
+                mean_episode_reward_opt = np.add(mean_episode_reward_opt,
+                                             np.multiply(
+                                                 np.subtract(episode_rewards_opt, mean_episode_reward_opt),
+                                                 1 / (i + 1)))
+
+    # Evaluating the performance
+    print("Performance : ", reward / total_episodes)
+
+    # Visualizing the Q-matrix
+    print(Q_opt)
+    print(print_q_policy(Q_opt))
+
+    # plot
+    # plt.plot(episode_rewards_eps_test)
+    plt.plot(mean_episode_reward, label='normal',
+             linewidth=0.5)
+    plt.plot(mean_episode_reward_opt, label='optimized',
+             linewidth=0.5)
+    plt.legend()
+    plt.title(r'Mean reward per episode, different update functions, n = %i' %n)
     plt.ylabel('mean reward per episode')
     plt.xlabel('episode')
     plt.show()
@@ -220,7 +348,8 @@ def test_alpha(alpha_array, epsilon):
 
 ### run actual tests:
 #Building the environment
-env = gym.make('FrozenLake8x8-v1', is_slippery = False)
+# env = gym.make('FrozenLake8x8-v1', is_slippery = False)
+env = gym.make('FrozenLake-v1', map_name="4x4", is_slippery = False)
 # env = gym.make('FrozenLake-v1', map_name="4x4", is_slippery=False)
 # Env information
     #     "4x4":[
@@ -251,15 +380,17 @@ env = gym.make('FrozenLake8x8-v1', is_slippery = False)
 
 
 #Defining the different parameters
-n = 10 # size of the experiments from which mean will be taken
+n = 2 # size of the experiments from which mean will be taken
 epsilon_array = [0.01, 0.1, 0.2, 0.5, 0.9]
 alpha_array = [0.01, 0.1, 0.2, 0.5, 0.9]
 epsilon_decay = 0.99
-total_episodes = 500
+total_episodes = 100
 max_steps = 50
 alpha = 0.1
 gamma = 0.9        # discount rate
 
-#test_epsilon(epsilon_array, alpha=0.1)
+# test_epsilon(epsilon_array, alpha=0.1)
 
-test_alpha(alpha_array, epsilon=0.1)
+# test_alpha(alpha_array, epsilon=0.1)
+
+test_update_compare(alpha, epsilon=0.1)
